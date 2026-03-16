@@ -69,6 +69,9 @@ class restore_quizaccess_safeexambrowser_subplugin extends restore_mod_quiz_acce
         $data = (object)$data;
         $data->quizid = $this->get_new_parentid('quiz');
         $data->allowedkeys = quizaccess_safeexambrowser::clean_keys($data->allowedkeys);
+        if (!empty($data->allowedconfigkeys)) {
+            $data->allowedconfigkeys = quizaccess_safeexambrowser::clean_keys($data->allowedconfigkeys);
+        }
         $DB->insert_record('quizaccess_safeexambrowser', $data);
     }
 }

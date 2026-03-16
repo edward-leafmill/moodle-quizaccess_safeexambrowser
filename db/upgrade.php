@@ -48,6 +48,20 @@ function xmldb_quizaccess_safeexambrowser_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2013041700, 'quizaccess', 'safeexambrowser');
     }
 
+    if ($oldversion < 2026031600) {
+
+        // Add allowedconfigkeys field for Config Key support.
+        $table = new xmldb_table('quizaccess_safeexambrowser');
+        $field = new xmldb_field('allowedconfigkeys', XMLDB_TYPE_TEXT, null, null, null, null, null, 'allowedkeys');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Safeexambrowser savepoint reached.
+        upgrade_plugin_savepoint(true, 2026031600, 'quizaccess', 'safeexambrowser');
+    }
+
     return true;
 }
 

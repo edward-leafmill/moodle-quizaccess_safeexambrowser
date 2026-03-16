@@ -36,8 +36,11 @@ require_once($CFG->dirroot . '/mod/quiz/accessrule/accessrulebase.php');
  */
 class quizaccess_safeexambrowser extends quiz_access_rule_base {
 
-    /** @var array the allowed keys. */
+    /** @var array the allowed browser exam keys. */
     protected $allowedkeys;
+
+    /** @var array the allowed config keys. */
+    protected $allowedconfigkeys;
 
     /**
      * Create an instance of this rule for a particular quiz.
@@ -48,6 +51,9 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
     public function __construct($quizobj, $timenow) {
         parent::__construct($quizobj, $timenow);
         $this->allowedkeys = self::split_keys($this->quiz->safeexambrowser_allowedkeys);
+        $this->allowedconfigkeys = self::split_keys(
+                isset($this->quiz->safeexambrowser_allowedconfigkeys)
+                ? $this->quiz->safeexambrowser_allowedconfigkeys : '');
     }
 
 
@@ -62,8 +68,11 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
      * @return quiz_access_rule_base|null the rule, if applicable, else null.
      */
     public static function make(quiz $quizobj, $timenow, $canignoretimelimits) {
+        $quiz = $quizobj->get_quiz();
+        $haskeys = !empty($quiz->safeexambrowser_allowedkeys);
+        $hasconfigkeys = !empty($quiz->safeexambrowser_allowedconfigkeys);
 
-        if (empty($quizobj->get_quiz()->safeexambrowser_allowedkeys)) {
+        if (!$haskeys && !$hasconfigkeys) {
             return null;
         }
 
@@ -89,6 +98,16 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
         );
         $mform->addHelpButton('safeexambrowser_allowedkeys',
                 'allowedbrowserkeys', 'quizaccess_safeexambrowser');
+
+        $mform->addElement('textarea', 'safeexambrowser_allowedconfigkeys',
+                get_string('allowedconfigkeys', 'quizaccess_safeexambrowser'),
+                array('rows' => 2, 'cols' => 70));
+        $mform->setType('safeexambrowser_allowedconfigkeys', PARAM_RAW_TRIMMED);
+        $mform->setAdvanced('safeexambrowser_allowedconfigkeys',
+                get_config('quizaccess_safeexambrowser', 'allowedkeys_adv')
+        );
+        $mform->addHelpButton('safeexambrowser_allowedconfigkeys',
+                'allowedconfigkeys', 'quizaccess_safeexambrowser');
     }
 
     /**
@@ -110,6 +129,13 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
             }
         }
 
+        if (!empty($data['safeexambrowser_allowedconfigkeys'])) {
+            $keyerrors = self::validate_config_keys($data['safeexambrowser_allowedconfigkeys']);
+            if ($keyerrors) {
+                $errors['safeexambrowser_allowedconfigkeys'] = implode(' ', $keyerrors);
+            }
+        }
+
         return $errors;
     }
 
@@ -122,17 +148,23 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
      */
     public static function save_settings($quiz) {
         global $DB;
-        if (empty($quiz->safeexambrowser_allowedkeys)) {
+
+        $haskeys = !empty($quiz->safeexambrowser_allowedkeys);
+        $hasconfigkeys = !empty($quiz->safeexambrowser_allowedconfigkeys);
+
+        if (!$haskeys && !$hasconfigkeys) {
             $DB->delete_records('quizaccess_safeexambrowser', array('quizid' => $quiz->id));
         } else {
             $record = $DB->get_record('quizaccess_safeexambrowser', array('quizid' => $quiz->id));
             if (!$record) {
                 $record = new stdClass();
                 $record->quizid = $quiz->id;
-                $record->allowedkeys = self::clean_keys($quiz->safeexambrowser_allowedkeys);
+                $record->allowedkeys = $haskeys ? self::clean_keys($quiz->safeexambrowser_allowedkeys) : '';
+                $record->allowedconfigkeys = $hasconfigkeys ? self::clean_keys($quiz->safeexambrowser_allowedconfigkeys) : null;
                 $DB->insert_record('quizaccess_safeexambrowser', $record);
             } else {
-                $record->allowedkeys = self::clean_keys($quiz->safeexambrowser_allowedkeys);
+                $record->allowedkeys = $haskeys ? self::clean_keys($quiz->safeexambrowser_allowedkeys) : '';
+                $record->allowedconfigkeys = $hasconfigkeys ? self::clean_keys($quiz->safeexambrowser_allowedconfigkeys) : null;
                 $DB->update_record('quizaccess_safeexambrowser', $record);
             }
         }
@@ -173,7 +205,8 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
      */
     public static function get_settings_sql($quizid) {
         return array(
-            'safeexambrowser.allowedkeys AS safeexambrowser_allowedkeys',
+            'safeexambrowser.allowedkeys AS safeexambrowser_allowedkeys, ' .
+            'safeexambrowser.allowedconfigkeys AS safeexambrowser_allowedconfigkeys',
             'LEFT JOIN {quizaccess_safeexambrowser} safeexambrowser ON safeexambrowser.quizid = quiz.id',
             array());
     }
@@ -186,7 +219,8 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
      *      reason if access should be prevented.
      */
     public function prevent_access() {
-        if (!self::check_access($this->allowedkeys, $this->quizobj->get_context())) {
+        if (!self::check_access($this->allowedkeys, $this->allowedconfigkeys,
+                $this->quizobj->get_context())) {
             return self::get_blocked_user_message();
         } else {
             return false;
@@ -278,6 +312,26 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
     }
 
     /**
+     * This helper method validates a string containing a list of config keys.
+     * @param string $keys a list of config keys separated by newlines.
+     * @return array list of any problems found.
+     */
+    public static function validate_config_keys($keys) {
+        $errors = array();
+        $keys = self::split_keys($keys);
+        foreach ($keys as $i => $key) {
+            if (!preg_match('~^[a-f0-9]{64}$~', $key)) {
+                $errors[] = get_string('allowedconfigkeyssyntax', 'quizaccess_safeexambrowser');
+                break;
+            }
+        }
+        if (count($keys) != count(array_unique($keys))) {
+            $errors[] = get_string('allowedconfigkeysdistinct', 'quizaccess_safeexambrowser');
+        }
+        return $errors;
+    }
+
+    /**
      * This helper method takes a set of keys that would pass the slighly relaxed
      * validation peformed by {@link validate_keys()}, and cleans it up so that
      * the allowed keys are lower case and separated by a single newline character.
@@ -290,20 +344,38 @@ class quizaccess_safeexambrowser extends quiz_access_rule_base {
 
     /**
      * Check the whether the current request is permitted.
-     * @param array $keys allowed keys
+     * @param array $keys allowed browser exam keys.
+     * @param array $configkeys allowed config keys.
      * @param context $context the context in which we are checking access. (Normally the quiz context.)
      * @return bool true if the user is using a browser with a permitted key, false if not,
      * or of the user has the 'quizaccess/safeexambrowser:exemptfromcheck' capability.
      */
-    public static function check_access(array $keys, context $context) {
+    public static function check_access(array $keys, array $configkeys, context $context) {
         if (has_capability('quizaccess/safeexambrowser:exemptfromcheck', $context)) {
             return true;
         }
-        if (!array_key_exists('HTTP_X_SAFEEXAMBROWSER_REQUESTHASH', $_SERVER)) {
-            return false;
+
+        $url = self::get_this_page_url();
+
+        // Check Config Key header first (platform-independent, preferred).
+        if (!empty($configkeys) &&
+                array_key_exists('HTTP_X_SAFEEXAMBROWSER_CONFIGKEYHASH', $_SERVER)) {
+            if (self::check_keys($configkeys, $url,
+                    trim($_SERVER['HTTP_X_SAFEEXAMBROWSER_CONFIGKEYHASH']))) {
+                return true;
+            }
         }
-        return self::check_keys($keys, self::get_this_page_url(),
-                trim($_SERVER['HTTP_X_SAFEEXAMBROWSER_REQUESTHASH']));
+
+        // Fall back to Browser Exam Key header.
+        if (!empty($keys) &&
+                array_key_exists('HTTP_X_SAFEEXAMBROWSER_REQUESTHASH', $_SERVER)) {
+            if (self::check_keys($keys, $url,
+                    trim($_SERVER['HTTP_X_SAFEEXAMBROWSER_REQUESTHASH']))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -53,7 +53,7 @@ class backup_quizaccess_safeexambrowser_subplugin extends backup_mod_quiz_access
         $subplugin = $this->get_subplugin_element();
         $subpluginwrapper = new backup_nested_element($this->get_recommended_name());
         $subplugintablesettings = new backup_nested_element('quizaccess_safeexambrowser',
-                null, array('allowedkeys'));
+                null, array('allowedkeys', 'allowedconfigkeys'));
 
         // Connect XML elements into the tree.
         $subplugin->add_child($subpluginwrapper);
